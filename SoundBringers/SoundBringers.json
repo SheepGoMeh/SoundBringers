@@ -1,0 +1,9 @@
+{
+  "Author": "SheepGoMeh",
+  "Name": "SoundBringers",
+  "InternalName": "SoundBringers",
+  "Description": "Plays a second mix of the game's audio, with its own volume for BGM, Sound Effects, Voice, System Sounds, Ambient Sounds and Performance, to an output device of your choice, so your stream can hear what you don't. Requires a virtual audio cable driver (for example VB-Cable), which this plugin does not install.\nOpen the settings with /soundbringers",
+  "Punchline": "A second game audio mix for your stream.",
+  "Tags": ["Streaming", "Audio", "OBS"],
+  "ApplicableVersion": "any"
+}

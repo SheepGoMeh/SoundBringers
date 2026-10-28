@@ -5,6 +5,8 @@
 		<IsPackable>false</IsPackable>
 		<Authors>SheepGoMeh</Authors>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<!-- the mixer runs inside the game's audio period; unoptimized Debug code misses it -->
+		<Optimize>true</Optimize>
 	</PropertyGroup>
 	<PropertyGroup>
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>

@@ -41,7 +41,20 @@ internal sealed class PeriodProcessor
 			return Outcome.Silence;
 		}
 
-		graph.LoadEffects(slot);
+		ShadowGraph[]? splits = graph.Splits;
+		if (splits == null)
+		{
+			graph.LoadEffects(slot);
+		}
+		else
+		{
+			// the copies are in the primary graph's node order, which every split shares
+			foreach (ShadowGraph split in splits)
+			{
+				split.LoadEffects(slot);
+			}
+		}
+
 		this.volume.Begin(slot);
 		this.table.BeginPeriod();
 		float active = this.volume.ActiveVolume;
@@ -58,10 +71,23 @@ internal sealed class PeriodProcessor
 			}
 		}
 
-		graph.Process(gain, graph.Output);
+		if (splits == null)
+		{
+			graph.Process(gain, graph.Output);
 
-		// an effect that went non-finite would stay that way
-		return Finite(graph.Output) ? Outcome.Output : Outcome.NonFinite;
+			// an effect that went non-finite would stay that way
+			return Finite(graph.Output) ? Outcome.Output : Outcome.NonFinite;
+		}
+
+		// every split runs, so none is left holding a period's voices
+		bool finite = true;
+		foreach (ShadowGraph split in splits)
+		{
+			split.Process(gain, split.Output);
+			finite &= Finite(split.Output);
+		}
+
+		return finite ? Outcome.Output : Outcome.NonFinite;
 	}
 
 	private void Voice(PeriodSlot slot, ShadowGraph graph, int index)
@@ -72,7 +98,8 @@ internal sealed class PeriodProcessor
 		ReadOnlySpan<byte> child = slot.At(r.ChildOffset, SoundTerms.ChildBytes);
 		ReadOnlySpan<byte> root = slot.At(r.RootOffset, SoundTerms.RootBytes);
 		int busId = root[GameAudio.RootBusId];
-		float level = slot.Levels!.Level(Categories.Of(busId));
+		StreamCategory category = Categories.Of(busId);
+		float level = slot.Levels!.Level(category);
 		VoiceStateTable.History last = this.table.Last(r.Voice, r.Sound);
 
 		// a level of 0 only fades a voice that was rendered a moment ago out; any other voice at level 0 costs nothing
@@ -138,6 +165,13 @@ internal sealed class PeriodProcessor
 			}
 		}
 
+		// a split stream mixes the voice into its category's graph only
+		ShadowGraph? target = graph.Splits == null ? graph : (int)category < graph.Splits.Length ? graph.Splits[(int)category] : null;
+		if (target == null)
+		{
+			return;
+		}
+
 		int sends = Math.Clamp(BinaryPrimitives.ReadInt32LittleEndian(voiceObject[GameAudio.VoiceSendCount..]), 0, MaxSends);
 		for (int i = 0; i < sends; i++)
 		{
@@ -145,7 +179,7 @@ internal sealed class PeriodProcessor
 			int node = graph.IndexOf((nint)BinaryPrimitives.ReadInt64LittleEndian(send[GameAudio.SendDestination..]));
 			if (node >= 0)
 			{
-				graph.Add(node, output, BinaryPrimitives.ReadSingleLittleEndian(send[GameAudio.SendGain..]));
+				target.Add(node, output, BinaryPrimitives.ReadSingleLittleEndian(send[GameAudio.SendGain..]));
 			}
 		}
 	}

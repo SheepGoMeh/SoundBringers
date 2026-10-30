@@ -25,6 +25,27 @@ public static class DevicePicker
 			}
 		}
 
+		foreach (OutputDevice device in devices)
+		{
+			if (LinuxSink.Matches(device.Name, LinuxSink.Name))
+			{
+				return device;
+			}
+		}
+
+		return null;
+	}
+
+	public static OutputDevice? ByName(IReadOnlyList<OutputDevice> devices, string sink)
+	{
+		foreach (OutputDevice device in devices)
+		{
+			if (LinuxSink.Matches(device.Name, sink))
+			{
+				return device;
+			}
+		}
+
 		return null;
 	}
 }

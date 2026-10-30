@@ -21,7 +21,11 @@ internal class MainWindow(SoundBringersConfiguration configuration, StreamOutput
 
 	public override void Draw()
 	{
-		if (ImGui.BeginCombo("Output", output.DeviceName ?? "(none)"))
+		bool split = configuration.SplitSinks;
+		if (split)
+			ImGui.BeginDisabled();
+
+		if (ImGui.BeginCombo("Output", split ? "(one sink per sound type)" : output.DeviceName ?? "(none)"))
 		{
 			foreach (OutputDevice device in this.devices)
 			{
@@ -40,6 +44,18 @@ internal class MainWindow(SoundBringersConfiguration configuration, StreamOutput
 		ImGui.SameLine();
 		if (ImGui.Button("Refresh"))
 			this.devices = output.Devices();
+
+		if (split)
+			ImGui.EndDisabled();
+
+		if (LinuxSink.Available)
+		{
+			// the framework update switches the outputs within a second
+			if (ImGui.Checkbox("Separate sink for each sound type", ref configuration.SplitSinks))
+				configuration.Save();
+			if (ImGui.IsItemHovered())
+				ImGui.SetTooltip("Plays each sound type to its own sink (SoundBringers-BGM, -Voice, ...) so OBS can capture them separately.\nEvery sink runs its own bus effects, which costs more CPU.");
+		}
 
 		if (!StreamOutput.IsWine)
 		{

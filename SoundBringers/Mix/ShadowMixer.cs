@@ -29,6 +29,7 @@ internal sealed class ShadowMixer: IDisposable
 	private const int MaxFrames = 4096;
 	private const int MaxSends = 16;
 	private const int MaxEffects = 8;
+	private const int SplitCount = 7; // StreamCategory.Bgm .. MasterOnly
 	private const int SlotCount = 4;
 	private const int SlotArenaBytes = 4 * 1024 * 1024;
 	private const int SlotVoices = 512;
@@ -41,6 +42,7 @@ internal sealed class ShadowMixer: IDisposable
 
 	private readonly StreamLevels levels;
 	private readonly SampleRing ring;
+	private readonly SampleRing[] splitRings;
 	private readonly HookSet hooks = new();
 	private readonly float[] silence = new float[MaxFrames * 2];
 	private readonly nint moduleBase = Service.SigScanner.Module.BaseAddress;
@@ -53,6 +55,7 @@ internal sealed class ShadowMixer: IDisposable
 	private Thread? worker;
 	private volatile bool stopping;
 	private volatile bool inline;
+	private volatile bool split;
 
 	// who processes the queue: the worker, or the audio thread in inline mode; never both at once
 	private int draining;
@@ -81,10 +84,11 @@ internal sealed class ShadowMixer: IDisposable
 	private Hook<ShadowRenderFn>? renderHook;
 	private Hook<ShadowVoiceFn>? voiceHook;
 
-	public ShadowMixer(StreamLevels levels, SampleRing ring)
+	public ShadowMixer(StreamLevels levels, SampleRing ring, SampleRing[] splitRings)
 	{
 		this.levels = levels;
 		this.ring = ring;
+		this.splitRings = splitRings;
 		this.processor.Fault = this.Fault;
 		try
 		{
@@ -171,6 +175,13 @@ internal sealed class ShadowMixer: IDisposable
 	{
 		get => this.enabled;
 		set => this.enabled = value;
+	}
+
+	// one graph, and one stream, per sound category; takes effect with the next refresh. Each category runs its own bus effects.
+	public bool Split
+	{
+		get => this.split;
+		set => this.split = value;
 	}
 
 	public bool HasGraph => Volatile.Read(ref this.graph) != null;
@@ -328,14 +339,29 @@ internal sealed class ShadowMixer: IDisposable
 			return;
 		}
 
-		this.ring.Write(graph.Output);
+		if (graph.Splits == null)
+		{
+			this.ring.Write(graph.Output);
+			return;
+		}
+
+		for (int i = 0; i < graph.Splits.Length; i++)
+		{
+			this.splitRings[i].Write(graph.Splits[i].Output);
+		}
 	}
 
+	// every stream gets the same silence, so they stay in step whichever one is playing
 	private void WriteSilence(int frames)
 	{
 		if (frames is >= 1 and <= MaxFrames)
 		{
-			this.ring.Write(this.silence.AsSpan(0, frames * 2));
+			ReadOnlySpan<float> samples = this.silence.AsSpan(0, frames * 2);
+			this.ring.Write(samples);
+			foreach (SampleRing splitRing in this.splitRings)
+			{
+				splitRing.Write(samples);
+			}
 		}
 	}
 
@@ -369,13 +395,14 @@ internal sealed class ShadowMixer: IDisposable
 			}
 
 			List<Description> nodes = Describe();
-			List<long> now = Signature(frames, channels, nodes);
+			bool split = this.split;
+			List<long> now = Signature(frames, channels, split, nodes);
 			if (Volatile.Read(ref this.graph) != null && CollectionsMarshal.AsSpan(now).SequenceEqual(CollectionsMarshal.AsSpan(this.signature)))
 			{
 				return;
 			}
 
-			ShadowGraph built = this.Build(nodes, frames, channels);
+			ShadowGraph built = this.Build(nodes, frames, channels, split);
 			this.signature = now;
 			Volatile.Write(ref this.graph, built);
 			this.lastRefreshError = string.Empty;
@@ -444,9 +471,9 @@ internal sealed class ShadowMixer: IDisposable
 		return new Description(voice, master, index, sends, list);
 	}
 
-	private static List<long> Signature(int frames, int channels, List<Description> nodes)
+	private static List<long> Signature(int frames, int channels, bool split, List<Description> nodes)
 	{
-		List<long> list = [frames, channels];
+		List<long> list = [frames, channels, split ? 1 : 0];
 		foreach (Description node in nodes)
 		{
 			list.Add(node.Pointer);
@@ -468,9 +495,35 @@ internal sealed class ShadowMixer: IDisposable
 		return list;
 	}
 
-	private ShadowGraph Build(List<Description> nodes, int frames, int channels)
+	private ShadowGraph Build(List<Description> nodes, int frames, int channels, bool split)
 	{
 		Dictionary<(nint, string), BusEffect> used = [];
+		ShadowGraph[]? splits = null;
+		if (split)
+		{
+			// each category's bus effects keep a history of their own
+			splits = new ShadowGraph[SplitCount];
+			for (int c = 0; c < splits.Length; c++)
+			{
+				splits[c] = this.BuildGraph(nodes, frames, channels, c, null, used);
+			}
+		}
+
+		ShadowGraph primary = this.BuildGraph(nodes, frames, channels, -1, splits, used);
+
+		// effects no longer in the graph are dropped with their delay lines
+		this.effects.Clear();
+		foreach (KeyValuePair<(nint, string), BusEffect> pair in used)
+		{
+			this.effects[pair.Key] = pair.Value;
+		}
+
+		return primary;
+	}
+
+	// category: the split this graph is for, -1 for the combined one
+	private ShadowGraph BuildGraph(List<Description> nodes, int frames, int channels, int category, ShadowGraph[]? splits, Dictionary<(nint, string), BusEffect> used)
+	{
 		ShadowNode[] built = new ShadowNode[nodes.Count];
 		int bed = -1;
 		int ambisonics = -1;
@@ -492,7 +545,7 @@ internal sealed class ShadowMixer: IDisposable
 			List<BusEffect> list = [];
 			for (int e = 0; e < node.Effects.Length; e++)
 			{
-				BusEffect? effect = this.Effect(node.Master, node.Index, e, node.Effects[e], used);
+				BusEffect? effect = this.Effect(node.Master, node.Index, e, node.Effects[e], category, used);
 				if (effect != null)
 				{
 					list.Add(effect);
@@ -513,16 +566,7 @@ internal sealed class ShadowMixer: IDisposable
 			}
 		}
 
-		ShadowGraph graph = new(built, bed, ambisonics, frames, channels);
-
-		// effects no longer in the graph are dropped with their delay lines
-		this.effects.Clear();
-		foreach (KeyValuePair<(nint, string), BusEffect> pair in used)
-		{
-			this.effects[pair.Key] = pair.Value;
-		}
-
-		return graph;
+		return new ShadowGraph(built, bed, ambisonics, frames, channels, splits);
 	}
 
 	// which effect class sits where; anything else (the analyzers) passes the audio through
@@ -539,7 +583,7 @@ internal sealed class ShadowMixer: IDisposable
 		_ => null,
 	};
 
-	private BusEffect? Effect(bool master, int index, int slot, nint pointer, Dictionary<(nint, string), BusEffect> used)
+	private BusEffect? Effect(bool master, int index, int slot, nint pointer, int category, Dictionary<(nint, string), BusEffect> used)
 	{
 		string? kind = KindOf(master, index, slot);
 		if (kind == null || pointer == 0)
@@ -547,7 +591,7 @@ internal sealed class ShadowMixer: IDisposable
 			return null;
 		}
 
-		(nint, string) key = (pointer, kind);
+		(nint, string) key = (pointer, category < 0 ? kind : $"{kind}#{category}");
 		if (!this.effects.TryGetValue(key, out BusEffect? effect))
 		{
 			nint core = pointer - PeriodCopier.EffectBack;

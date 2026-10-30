@@ -71,6 +71,12 @@ internal class MainWindow(SoundBringersConfiguration configuration, StreamOutput
 		if (ImGui.Checkbox("Mute while the game is in the background", ref configuration.MuteInBackground))
 			this.Changed();
 
+		// the framework update hands it to the mixer within a second
+		if (ImGui.Checkbox("Mix on the game's audio thread", ref configuration.InlineMix))
+			configuration.Save();
+		if (ImGui.IsItemHovered())
+			ImGui.SetTooltip("Mixes the stream inside the game's audio render instead of on a separate thread.\nNo handoff between threads, but the game's audio waits for the stream's mix: try it if the stream crackles while your speakers don't.");
+
 		ImGui.PushTextWrapPos(ImGui.GetFontSize() * 28);
 		ImGui.TextDisabled("Sounds the game drops because Self, Party or Other PCs is at or near 0 are missing from the stream too.");
 		ImGui.PopTextWrapPos();

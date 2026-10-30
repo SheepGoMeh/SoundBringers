@@ -120,12 +120,7 @@ public sealed class ShadowGraph
 	// MixIn: node += signal x gain
 	public void Add(int node, ReadOnlySpan<float> signal, float gain)
 	{
-		float[] buffer = this.nodes[node].Buffer;
-		for (int i = 0; i < this.Frames * this.Channels; i++)
-		{
-			buffer[i] = (signal[i] * gain) + buffer[i];
-		}
-
+		Simd.MulAdd(this.nodes[node].Buffer.AsSpan(0, this.Frames * this.Channels), signal, gain);
 		this.nodes[node].Inputs++;
 	}
 

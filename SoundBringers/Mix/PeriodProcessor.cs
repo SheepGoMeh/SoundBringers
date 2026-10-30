@@ -150,16 +150,5 @@ internal sealed class PeriodProcessor
 		}
 	}
 
-	private static bool Finite(ReadOnlySpan<float> samples)
-	{
-		foreach (float sample in samples)
-		{
-			if (!float.IsFinite(sample))
-			{
-				return false;
-			}
-		}
-
-		return true;
-	}
+	private static bool Finite(ReadOnlySpan<float> samples) => Simd.Finite(samples);
 }

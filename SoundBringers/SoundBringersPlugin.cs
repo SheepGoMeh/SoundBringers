@@ -107,7 +107,10 @@ public class SoundBringersPlugin: IDalamudPlugin
 				this.mixer?.Refresh();
 				this.state = this.Evaluate();
 				if (this.mixer != null)
+				{
 					this.mixer.Enabled = this.state is not (StreamState.SpatialDisabled or StreamState.GameDataMissing or StreamState.Unsupported);
+					this.mixer.Inline = this.configuration.InlineMix;
+				}
 			}
 		}
 		catch (Exception e)

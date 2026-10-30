@@ -21,7 +21,8 @@ internal delegate nint ShadowVoiceFn(nint voice, nint scratch);
 // the DSP and writes the ring. With no free slot the period is dropped for the stream.
 //
 // Threads: the graph is built on the framework thread and published by one reference swap; the audio thread reads it for the copy, the
-// worker owns it while processing (the slot carries its graph). Nothing on the audio thread allocates.
+// worker owns it while processing (the slot carries its graph). Nothing on the audio thread allocates. In inline mode the audio thread
+// does the worker's part itself, right after publishing the slot.
 internal sealed class ShadowMixer: IDisposable
 {
 	private const int SampleRate = 48000;
@@ -51,6 +52,10 @@ internal sealed class ShadowMixer: IDisposable
 	private readonly PeriodProcessor processor = new();
 	private Thread? worker;
 	private volatile bool stopping;
+	private volatile bool inline;
+
+	// who processes the queue: the worker, or the audio thread in inline mode; never both at once
+	private int draining;
 
 	// worker only: dropped periods already written as silence
 	private long gapsHandled;
@@ -170,6 +175,14 @@ internal sealed class ShadowMixer: IDisposable
 
 	public bool HasGraph => Volatile.Read(ref this.graph) != null;
 
+	// processes each period on the game's audio thread, at the end of the render detour, instead of on the worker: no handoff, but
+	// the game's audio period waits for the stream's DSP
+	public bool Inline
+	{
+		get => this.inline;
+		set => this.inline = value;
+	}
+
 	// the detours stop first, then the worker; the signal is freed only when no detour can still set it
 	public void Dispose()
 	{
@@ -230,6 +243,24 @@ internal sealed class ShadowMixer: IDisposable
 		while (!this.stopping)
 		{
 			this.signal.WaitOne(50);
+			if (!this.inline)
+			{
+				this.TryDrain();
+			}
+		}
+	}
+
+	// worker, or the audio thread in inline mode: every published slot. Skipped when the other side is draining (a mode switch);
+	// what it leaves is drained next time.
+	private void TryDrain()
+	{
+		if (Interlocked.CompareExchange(ref this.draining, 1, 0) != 0)
+		{
+			return;
+		}
+
+		try
+		{
 			while (true)
 			{
 				// the gap count is read before the queue, so a drop that came after a slot never overtakes it
@@ -262,6 +293,10 @@ internal sealed class ShadowMixer: IDisposable
 
 				this.queue.Release();
 			}
+		}
+		finally
+		{
+			Volatile.Write(ref this.draining, 0);
 		}
 	}
 
@@ -710,6 +745,20 @@ internal sealed class ShadowMixer: IDisposable
 
 		slot.GapsBefore = this.gaps;
 		this.queue.Publish();
+		if (this.inline)
+		{
+			try
+			{
+				this.TryDrain();
+			}
+			catch (Exception e)
+			{
+				this.Fault(e);
+			}
+
+			return;
+		}
+
 		try
 		{
 			this.signal.Set();

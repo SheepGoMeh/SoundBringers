@@ -46,10 +46,7 @@ public static class MasterPath
 
 		if (ran && gain != 1f)
 		{
-			for (int i = 0; i < frames * channels; i++)
-			{
-				buffer[i] *= gain;
-			}
+			Simd.Scale(buffer[..(frames * channels)], gain);
 		}
 
 		return ran;
@@ -58,9 +55,6 @@ public static class MasterPath
 	// spatial audio off: the render callback adds Master ambisonics into Master bed at gain 1 (a MixIn of the bed master)
 	public static void AddAmbisonics(Span<float> bed, ReadOnlySpan<float> ambisonics, int length)
 	{
-		for (int i = 0; i < length; i++)
-		{
-			bed[i] = ambisonics[i] + bed[i];
-		}
+		Simd.Add(bed[..length], ambisonics);
 	}
 }

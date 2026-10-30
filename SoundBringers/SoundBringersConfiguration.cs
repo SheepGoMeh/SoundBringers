@@ -17,6 +17,7 @@ public class SoundBringersConfiguration: IPluginConfiguration
 	public bool[] Muted = new bool[6];
 	public bool MuteInBackground;
 	public OutputMode OutputMode;
+	public bool InlineMix;
 
 	// a saved file can hold anything: six finite levels in 0..1, six mutes
 	public void Validate()

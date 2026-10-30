@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Runtime.Intrinsics;
 
 namespace SoundBringers.Dsp;
 
@@ -231,6 +232,20 @@ public static class VoiceRenderer
 	private static void Emit(Span<float> frame, ReadOnlySpan<float> mix, ReadOnlySpan<float> gains, float volume)
 	{
 		int outCh = frame.Length;
+
+		// an 8-channel frame is one vector: the same multiply-add per channel, in the same order
+		if (outCh == 8 && Vector256.IsHardwareAccelerated)
+		{
+			Vector256<float> sum = Vector256.Create((ReadOnlySpan<float>)frame);
+			for (int c = 0; c < mix.Length; c++)
+			{
+				sum = (Vector256.Create(mix[c]) * Vector256.Create(gains.Slice(c * 8, 8))) + sum;
+			}
+
+			(sum * Vector256.Create(volume)).CopyTo(frame);
+			return;
+		}
+
 		for (int c = 0; c < mix.Length; c++)
 		{
 			for (int r = 0; r < outCh; r++)

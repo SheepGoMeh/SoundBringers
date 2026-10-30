@@ -14,6 +14,7 @@ It provides:
 * A stream that ignores the in-game volume sliders, mutes and the background mute.
 * An option to mute the stream while the game is in the background.
 * Output modes: Shared, Low latency (Windows 10 or later), and Exclusive.
+* An option to mix the stream on the game's audio thread instead of a separate one, for systems where the stream crackles and your speakers don't.
 
 ## Requirements
 * A virtual audio cable driver. The plugin does not install one. Any of these work:

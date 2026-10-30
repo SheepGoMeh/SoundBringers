@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 
@@ -68,7 +69,8 @@ public static class MasterPath
 		}
 	}
 
-	// 8 frames x 8 channels to 8 channels x 8 frames
+	// 8 frames x 8 channels to 8 channels x 8 frames; inlined, so the 8 vectors stay in registers
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private static void Transpose(ReadOnlySpan<float> block, out Vector256<float> c0, out Vector256<float> c1, out Vector256<float> c2,
 		out Vector256<float> c3, out Vector256<float> c4, out Vector256<float> c5, out Vector256<float> c6, out Vector256<float> c7)
 	{

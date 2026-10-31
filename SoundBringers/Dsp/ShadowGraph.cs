@@ -34,8 +34,9 @@ public sealed class ShadowGraph
 	private readonly int ambisonics;
 
 	// bed / ambisonics: node indices of Master bed and Master ambisonics, -1 when absent
-	public ShadowGraph(ShadowNode[] nodes, int bed, int ambisonics, int frames, int channels)
+	public ShadowGraph(ShadowNode[] nodes, int bed, int ambisonics, int frames, int channels, ShadowGraph[]? splits = null)
 	{
+		this.Splits = splits;
 		this.nodes = nodes;
 		this.bed = bed;
 		this.ambisonics = ambisonics;
@@ -56,6 +57,10 @@ public sealed class ShadowGraph
 	// one period's voice render and stereo result, allocated with the graph
 	public readonly float[] Scratch;
 	public readonly float[] Output;
+
+	// one graph per stream category with the same nodes and effects of its own, when the stream is split; this graph then only
+	// lends its layout and its scratch, and does not process
+	public ShadowGraph[]? Splits { get; }
 
 	public int Frames { get; }
 

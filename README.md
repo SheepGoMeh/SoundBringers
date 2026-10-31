@@ -21,6 +21,11 @@ It provides:
 	* [VB-Cable](https://vb-audio.com/Cable/) (free). The plugin picks "CABLE Input" by default.
 	* [Voicemeeter](https://vb-audio.com/Voicemeeter/). Pick one of its virtual inputs in the plugin.
 	* Any other driver that shows up as a Windows playback device.
+* On Linux (Wine/XIV Launcher) no driver is needed: the plugin creates a PulseAudio/PipeWire virtual sink named "SoundBringers" with
+  `pactl` and picks it by default. In OBS, capture "Monitor of SoundBringers" (Audio Output Capture / PulseAudio source).
+  Turn on "Separate sink for each sound type" to get one sink per type instead (SoundBringers-BGM, -SoundEffects, -Voice, -System,
+  -Ambient, -Performance and -Movie, the cutscene audio that has no slider) and capture each one's monitor. Each runs its own bus effects,
+  so it costs more CPU. The sinks stay until you remove them, e.g. `pactl unload-module <index>` from `pactl list short modules`.
 * Spatial audio turned off in the game's sound settings. The stream is the game's stereo mix, so it switches off while spatial audio is on.
 
 ## Setup

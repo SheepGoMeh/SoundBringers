@@ -19,6 +19,9 @@ public class SoundBringersConfiguration: IPluginConfiguration
 	public OutputMode OutputMode;
 	public bool InlineMix;
 
+	// Linux only: one virtual sink per sound category instead of one stereo mix
+	public bool SplitSinks;
+
 	// a saved file can hold anything: six finite levels in 0..1, six mutes
 	public void Validate()
 	{
@@ -42,6 +45,8 @@ public class SoundBringersConfiguration: IPluginConfiguration
 		this.StreamMaster = float.IsFinite(this.StreamMaster) ? Math.Clamp(this.StreamMaster, 0f, 1f) : 1f;
 		if (!Enum.IsDefined(this.OutputMode) || StreamOutput.IsWine)
 			this.OutputMode = OutputMode.Shared;
+		if (!LinuxSink.Available)
+			this.SplitSinks = false;
 	}
 
 	public void Save() => Service.PluginInterface.SavePluginConfig(this);

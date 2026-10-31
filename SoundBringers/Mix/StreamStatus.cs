@@ -1,3 +1,5 @@
+using SoundBringers.Output;
+
 namespace SoundBringers.Mix;
 
 public enum StreamState
@@ -37,7 +39,7 @@ public static class StreamStatus
 		StreamState.Ok => "Streaming",
 		StreamState.Approximate => "Streaming (surround speakers: the mix is folded to stereo)",
 		StreamState.SpatialDisabled => "Off: turn off spatial audio in the game's sound settings",
-		StreamState.NoDevice => "No virtual audio cable found, install one such as VB-Cable",
+		StreamState.NoDevice => StreamOutput.IsWine ? "No output device found" : "No virtual audio cable found, install one such as VB-Cable",
 		StreamState.DeviceLost => "Output device lost, retrying",
 		StreamState.OpenFailed => "Can't open the output device, retrying (see /xllog)",
 		StreamState.Unsupported => "Off: the game's audio format isn't supported (see /xllog)",

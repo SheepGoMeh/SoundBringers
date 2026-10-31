@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
@@ -22,11 +23,13 @@ public class SoundBringersPlugin: IDalamudPlugin
 	private readonly SoundBringersConfiguration configuration;
 	private readonly SampleRing ring = new(9600, 2);
 	private readonly StreamOutput output;
+	private readonly SplitOutput splitOutput;
 	private readonly StreamLevels levels = new();
 	private readonly WindowSystem windowSystem = new("SoundBringers");
 	private readonly MainWindow window;
 
 	private ShadowMixer? mixer;
+	private bool split;
 	private long lastPollMs;
 	private StreamState state = StreamState.GameDataMissing;
 
@@ -41,6 +44,12 @@ public class SoundBringersPlugin: IDalamudPlugin
 		bool gameDataOk = GameAudio.Initialize();
 
 		this.output = new StreamOutput(this.ring);
+		this.splitOutput = new SplitOutput([.. Enumerable.Range(0, LinuxSink.SplitNames.Length).Select(_ => new SampleRing(9600, 2))]);
+		LinuxSink.Ensure();
+		this.split = this.configuration.SplitSinks;
+		if (this.split)
+			LinuxSink.Ensure(LinuxSink.SplitNames);
+
 		this.TryStart();
 		this.levels.Publish(
 			this.configuration.StreamMaster,
@@ -65,7 +74,7 @@ public class SoundBringersPlugin: IDalamudPlugin
 		{
 			try
 			{
-				this.mixer = new ShadowMixer(this.levels, this.ring);
+				this.mixer = new ShadowMixer(this.levels, this.ring, this.splitOutput.Rings) { Split = this.split };
 			}
 			catch (Exception e)
 			{
@@ -76,6 +85,12 @@ public class SoundBringersPlugin: IDalamudPlugin
 
 	private void TryStart()
 	{
+		if (this.split)
+		{
+			this.splitOutput.Start(this.configuration.OutputMode);
+			return;
+		}
+
 		OutputDevice? device = DevicePicker.Pick(this.output.Devices(), this.configuration.DeviceId);
 		if (device != null)
 		{
@@ -97,8 +112,19 @@ public class SoundBringersPlugin: IDalamudPlugin
 			if (now - this.lastPollMs >= 1000)
 			{
 				this.lastPollMs = now;
+				if (this.split != this.configuration.SplitSinks)
+				{
+					this.SwitchSplit(this.configuration.SplitSinks);
+				}
+
 				this.output.Poll();
-				if (!this.output.HasDevice || this.output.DeviceLost)
+				this.splitOutput.Poll();
+				if (this.split)
+				{
+					this.splitOutput.ReleaseLost();
+					this.TryStart();
+				}
+				else if (!this.output.HasDevice || this.output.DeviceLost)
 				{
 					this.output.Release();
 					this.TryStart();
@@ -110,6 +136,7 @@ public class SoundBringersPlugin: IDalamudPlugin
 				{
 					this.mixer.Enabled = this.state is not (StreamState.SpatialDisabled or StreamState.GameDataMissing or StreamState.Unsupported);
 					this.mixer.Inline = this.configuration.InlineMix;
+					this.mixer.Split = this.split;
 				}
 			}
 		}
@@ -117,6 +144,19 @@ public class SoundBringersPlugin: IDalamudPlugin
 		{
 			Service.PluginLog.Error(e, "Update failed");
 		}
+	}
+
+	private void SwitchSplit(bool on)
+	{
+		this.split = on;
+		this.output.Stop();
+		this.splitOutput.Stop();
+		if (on)
+		{
+			LinuxSink.Ensure(LinuxSink.SplitNames);
+		}
+
+		this.TryStart();
 	}
 
 	private StreamState Evaluate()
@@ -127,10 +167,10 @@ public class SoundBringersPlugin: IDalamudPlugin
 			ready,
 			spatial,
 			ready ? GameAudio.EndpointChannels() : 2,
-			this.output.HasDevice,
-			this.output.DeviceLost,
+			this.split ? this.splitOutput.HasDevice : this.output.HasDevice,
+			this.split ? this.splitOutput.DeviceLost : this.output.DeviceLost,
 			!ready || this.mixer!.HasGraph,
-			this.output.OpenFailed);
+			this.split ? this.splitOutput.OpenFailed : this.output.OpenFailed);
 	}
 
 	private static unsafe bool WindowInactive() => Framework.Instance()->WindowInactive;
@@ -150,6 +190,7 @@ public class SoundBringersPlugin: IDalamudPlugin
 		Service.Framework.Update -= this.OnUpdate;
 		this.mixer?.Dispose();
 		this.output.Dispose();
+		this.splitOutput.Dispose();
 	}
 
 	public void Dispose()
